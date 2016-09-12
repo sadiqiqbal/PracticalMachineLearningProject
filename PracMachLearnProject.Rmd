@@ -1,0 +1,108 @@
+---
+title: "Practical Machine Learning Course Project"
+output: pdf_document
+fontsize: 7pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## <span style="color:brown"> Description
+
+In this project, we use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. The aim is to predict the manner in which the participants did the exercise. The 5 possible methods include:
+
+* A - exactly according to the specification
+* B - throwing the elbows to the front
+* C - lifting the dumbbell only halfway
+* D - lowering the dumbbell only halfway
+* E - throwing the hips to the front
+
+## <span style="color:brown"> Data Set
+### <span style="color:green"> Setting session, clearing space, loading necessary libraries 
+We first set the working directory, then clear the memory as a good practice before starting the analysis. After which, we load the necessary libraries for analysis.
+```{r, tidy = TRUE, warning = FALSE}
+setwd("~/Coursera/PracMachineLearning")
+rm(list=ls());library(knitr);library(lattice);library(ggplot2);library(caret);library(survival);library(plyr);library(corrplot);
+library(rpart);library(rpart.plot);library(randomForest);library(parallel); library(splines); library(gbm);
+```
+
+### <span style="color:green"> Loading train and test data 
+Then we load the train and the test data by replacing all invalid fields as NA
+```{r warning = FALSE, tidy = TRUE, strip.white = TRUE}
+Train_data<-read.csv("./pml-training.csv", na.strings = c("NA", "#DIV/0!", ""))
+Test_data<-read.csv("./pml-testing.csv",na.strings = c("NA", "#DIV/0!", ""))
+```
+
+### <span style="color:green"> Cleaning data 
+Next, we explore the train and test data to get an idea about it using head, str and summary commands. The results produced using these commands are ignored here. It is
+inferred that there are 160 variables. The missing values, the first seven coulumns and the near zero variance variables are removed.
+```{r warning = FALSE, tidy = TRUE, strip.white = TRUE}
+Train_data <- Train_data[, colSums(is.na(Train_data)) == 0]
+Test_data  <- Test_data[, colSums(is.na(Test_data)) == 0]
+Train_data  <- Train_data[, -c(1:7)]
+Test_data   <- Test_data[, -c(1:7)]
+nzv <- nearZeroVar(Train_data,saveMetrics=T)
+zero.var.ind <- sum(nzv$nzv)
+
+if ((zero.var.ind>0)) {
+        Train_data <- Train_data[,nzv$nzv==F]
+}
+```
+
+### <span style="color:green"> Splitting train set further and creating cross-validation set; a quick correlation analysis
+We slice the train data further in to two parts for analysis using
+```{r warning = FALSE, tidy = TRUE, strip.white = TRUE}
+set.seed(1234567)
+Split_Train <- createDataPartition(Train_data$classe, p=0.70, list=F)
+Train_set <- Train_data[Split_Train, ]
+Validate_set <- Train_data[-Split_Train, ]
+```
+The correlation analysis is performed. And, in the scale in the correlation plot, the further one approaches the end of this scale, the higher is the correlation. Note that, roll_belt is highly correlated to total_accel_belt and accel_belt_z. Similarly, gyros_dumbbell_z has a high correlation with gyros_dumbbell_x.
+```{r warning = FALSE, tidy = TRUE, strip.white = TRUE, fig.height = 20, fig.width = 20}
+CorrelationMatrix <- cor(Train_set[, -53])
+corrplot(CorrelationMatrix, method = "pie", tl.cex = 0.9, tl.col = "black")
+```
+
+## <span style="color:brown"> Building machine learning model, Cross validation and estimating out of sample error
+In this section we build two different models, namely Generalized Boosetd Regression Model and Random Forest Model on the train set extracted in the above section, and use them for cross validation. So, in each model the model is trained first and then a cross validation is done. The out of sample error must be small and is estimated using the rest of the probing sample. We expect it to be less than 3% or less.
+```{r}
+#Generalized Boosted Regression Model - Training set
+gbm_model  <- train(classe ~ ., data=Train_set, method="gbm", 
+                    trControl = trainControl(method = "cv", number = 10), verbose = F)
+pred_gbm <- predict(gbm_model, Train_set)
+res_gbm <- confusionMatrix(pred_gbm, Train_set$classe)
+confusionMatrix(pred_gbm, Train_set$classe)
+```
+```{r}
+# Cross validation
+cv_gbm <- predict(gbm_model, Validate_set)
+cv_res_gbm <- confusionMatrix(cv_gbm, Validate_set$classe)
+confusionMatrix(cv_gbm, Validate_set$classe)
+```
+
+We do the same procedure as above, but adopt random forests in our training model this time. Finally, we compare both the models.
+```{r}
+#Random Forest - Training set
+rand_forest_model <- randomForest(classe ~. , data = Train_set, method = "class")
+pred_rand_forest  <- predict(rand_forest_model, Train_set, type = "class")
+res_rand_forest    <- confusionMatrix(pred_rand_forest, Train_set$classe)
+confusionMatrix(pred_rand_forest, Train_set$classe)
+# Cross validation
+cv_rand_forest  <- predict(rand_forest_model, Validate_set, type = "class")
+cv_res_rand_forest    <- confusionMatrix(cv_rand_forest, Validate_set$classe)
+confusionMatrix(cv_rand_forest, Validate_set$classe)
+#Comparision
+res_comparision <- data.frame(res_gbm$overall,res_rand_forest$overall)
+res_comparision
+```
+
+We see that Random Forest performs better than generalized boosted regression model, since its accuracy, as seen in the comparision result above, is superior than the other model. Also, the estimated out of sample error is far less than expected.
+
+## <span style="color:brown"> Prediction
+
+The random forest model is finally applied to predict the 20 samples from the remaining test data.
+```{r}
+predict_test <- predict(rand_forest_model, newdata=Test_data)
+predict_test
+```
